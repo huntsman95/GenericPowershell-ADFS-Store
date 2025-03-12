@@ -12,39 +12,41 @@ namespace Skryptek
 {
     public class GenericPowershell : IAttributeStore
     {
+
+        public string doubleQuoteEscapeSequence = "``"; // We can't enter double-quotes inline into a claims-rule, so we need to substitute. The default is two backticks.
+
         #region IAttributeStore Members
 
         public IAsyncResult BeginExecuteQuery(string query, string[] parameters, AsyncCallback callback, object state)
         {
             if (String.IsNullOrEmpty(query))
             {
-                throw new AttributeStoreQueryFormatException("No query string.");
+                throw new AttributeStoreQueryFormatException("No query string defined in claim issuance rule. Please contact your system administrator.");
             }
 
-            if (parameters == null)
-            {
-                throw new AttributeStoreQueryFormatException("No query parameter.");
-            }
+            query = query.Replace(doubleQuoteEscapeSequence, "\"");
 
-            string result = null;
+            List<string[]> claimData = new List<string[]>();
 
             using (PowerShell PowerShellInst = PowerShell.Create())
             {
-                string queryF = string.Format(query,parameters);
-                PowerShellInst.AddScript(queryF, true);
+                PowerShellInst.AddScript(query, true);
+                // Recursively add arguments to the Powershell Script
+                if (null != parameters)
+                {
+                    for (int i = 0; i < parameters.Length; i++)
+                    {
+                        PowerShellInst.AddArgument(parameters[i]);
+                    }
+                }
                 try
                 {
                     Collection<PSObject> results = PowerShellInst.Invoke();
 
-                    // close the runspace
-
-                    StringBuilder stringBuilder = new StringBuilder();
                     foreach (PSObject obj in results)
                     {
-                        stringBuilder.AppendLine(obj.ToString());
+                        claimData.Add(new string[1] { obj.ToString() });
                     }
-
-                    result = stringBuilder.ToString();
                 }
                 catch (Exception ex)
                 {
@@ -52,9 +54,7 @@ namespace Skryptek
                 }
             }
 
-            string[][] outputValues = new string[1][];
-            outputValues[0] = new string[1];
-            outputValues[0][0] = result;
+            string[][] outputValues = claimData.ToArray();
 
             TypedAsyncResult<string[][]> asyncResult = new TypedAsyncResult<string[][]>(callback, state);
             asyncResult.Complete(outputValues, true);
@@ -68,7 +68,11 @@ namespace Skryptek
 
         public void Initialize(Dictionary<string, string> config)
         {
-            // No initialization is required for this store.
+            // Change the Double-Quote Escape Sequence if Defined
+            if (config.ContainsKey("doubleQuoteEscapeSequence"))
+            {
+                doubleQuoteEscapeSequence = config["doubleQuoteEscapeSequence"];
+            }
         }
         #endregion
     }
